@@ -1,41 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Filter, Check, Trophy, MapPin, Footprints, Zap, Package, Settings, X, Trash2, AlertTriangle, ArrowRight, Star, Construction, LayoutGrid, ArrowLeft, BookOpen, Globe, Gift, Flag, ChevronDown, ArrowUpDown, Calendar, History, LogIn, LogOut, User as UserIcon } from 'lucide-react';
+import { Search, Filter, Check, Trophy, MapPin, Footprints, Zap, Package, Settings, X, Trash2, AlertTriangle, ArrowRight, Star, Construction, LayoutGrid, ArrowLeft, BookOpen, Globe, Gift, Flag, ChevronDown, ArrowUpDown, Calendar, History } from 'lucide-react';
 import { POKEMON_DB, MILESTONES, ROUTE_ORDER, SPECIAL_ROUTES, POST_NATIONAL_ROUTES } from './constants';
 import { PokemonEntry, Rarity } from './types';
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
-
-// --- Firebase Configuration ---
-// TODO: Replace with your actual Firebase project configuration
-const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
-};
-
-// Initialize Firebase
-// Check if apps already exist to avoid re-initialization errors in development
-// AND check if the API key is actually configured (not the placeholder)
-const isFirebaseConfigured = firebaseConfig.apiKey && firebaseConfig.apiKey !== "YOUR_API_KEY";
-
-let app;
-let auth: any = null;
-let googleProvider: any = null;
-
-if (isFirebaseConfigured) {
-    try {
-        app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-        auth = getAuth(app);
-        googleProvider = new GoogleAuthProvider();
-    } catch (error) {
-        console.error("Firebase Initialization Error:", error);
-    }
-} else {
-    console.warn("Firebase is not configured with valid keys. Running in offline mode.");
-}
 
 // --- Utility Functions ---
 
@@ -252,9 +218,6 @@ const SettingsModal: React.FC<{
     onGoHome: () => void;
     onOpenGuide: () => void;
     onOpenHistory: () => void;
-    user: User | null;
-    onSignIn: () => void;
-    onSignOut: () => void;
 }> = ({ 
     isOpen, 
     onClose, 
@@ -265,10 +228,7 @@ const SettingsModal: React.FC<{
     onResetProgress, 
     onGoHome, 
     onOpenGuide,
-    onOpenHistory,
-    user,
-    onSignIn,
-    onSignOut
+    onOpenHistory
 }) => {
     const [confirmReset, setConfirmReset] = useState(false);
 
@@ -293,47 +253,6 @@ const SettingsModal: React.FC<{
                 
                 <div className="p-6 max-h-[80vh] overflow-y-auto">
                     
-                    {/* User Profile / Auth */}
-                    <div className="mb-6 p-4 bg-gray-50 rounded-xl border border-gray-100">
-                        {user ? (
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    {user.photoURL ? (
-                                        <img src={user.photoURL} alt={user.displayName || "User"} className="w-10 h-10 rounded-full border border-gray-200" />
-                                    ) : (
-                                        <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center text-rose-500">
-                                            <UserIcon className="w-5 h-5" />
-                                        </div>
-                                    )}
-                                    <div className="overflow-hidden">
-                                        <p className="text-sm font-bold text-gray-900 truncate">{user.displayName || "Trainer"}</p>
-                                        <p className="text-xs text-gray-500 truncate">{user.email}</p>
-                                    </div>
-                                </div>
-                                <button 
-                                    onClick={onSignOut}
-                                    className="p-2 hover:bg-gray-200 rounded-full text-gray-500 transition-colors"
-                                    title="Sign Out"
-                                >
-                                    <LogOut className="w-4 h-4" />
-                                </button>
-                            </div>
-                        ) : (
-                            <div className="text-center">
-                                <p className="text-sm text-gray-500 mb-3">
-                                    Sign in to save your progress to the cloud.
-                                </p>
-                                <button 
-                                    onClick={onSignIn}
-                                    className="w-full flex items-center justify-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-semibold py-2 px-4 rounded-lg transition-colors text-sm shadow-sm"
-                                >
-                                    <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-4 h-4" />
-                                    Sign in with Google
-                                </button>
-                            </div>
-                        )}
-                    </div>
-
                     {/* Game Mode Settings */}
                     <div className="space-y-6">
                         <div className="flex items-start justify-between gap-4">
@@ -822,7 +741,6 @@ interface TrackerProps {
     onOpenHistory: () => void;
     onViewMilestones: () => void;
     currentPoints: number;
-    user: User | null;
 }
 
 const Tracker: React.FC<TrackerProps> = ({ 
@@ -838,7 +756,6 @@ const Tracker: React.FC<TrackerProps> = ({
     onOpenHistory,
     onViewMilestones,
     currentPoints,
-    user
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterState, setFilterState] = useState<'all' | 'caught' | 'uncaught'>('all');
@@ -929,12 +846,6 @@ const Tracker: React.FC<TrackerProps> = ({
         onGoHome={onGoHome}
         onOpenGuide={() => { setIsSettingsOpen(false); onOpenGuide(); }}
         onOpenHistory={() => { setIsSettingsOpen(false); onOpenHistory(); }}
-        user={user}
-        onSignIn={() => { 
-            const provider = new GoogleAuthProvider();
-            signInWithPopup(auth, provider); 
-        }}
-        onSignOut={() => auth && signOut(auth)}
       />
 
       {/* Header */}
@@ -950,12 +861,6 @@ const Tracker: React.FC<TrackerProps> = ({
                 <p className="mt-2 text-gray-500">Track your progress to Mt. Silver.</p>
             </div>
             <div className="flex items-center gap-3">
-                {user && (
-                    <div className="hidden sm:flex items-center gap-2 bg-rose-50 px-3 py-1.5 rounded-full border border-rose-100">
-                        {user.photoURL && <img src={user.photoURL} alt="Profile" className="w-6 h-6 rounded-full" />}
-                        <span className="text-xs font-bold text-rose-700 max-w-[100px] truncate">{user.displayName?.split(' ')[0]}</span>
-                    </div>
-                )}
                 <button 
                     onClick={() => setIsSettingsOpen(true)}
                     className="p-2 hover:bg-gray-100 rounded-lg text-gray-500 transition-colors"
@@ -1098,7 +1003,7 @@ const Tracker: React.FC<TrackerProps> = ({
 
 // --- View: Landing Page ---
 
-const LandingPage: React.FC<{ onStart: () => void; onSignIn: () => void }> = ({ onStart, onSignIn }) => {
+const LandingPage: React.FC<{ onStart: () => void }> = ({ onStart }) => {
     return (
         <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-center relative overflow-hidden">
             {/* Background Effects */}
@@ -1129,14 +1034,6 @@ const LandingPage: React.FC<{ onStart: () => void; onSignIn: () => void }> = ({ 
                     >
                         Begin Your Adventure
                         <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                    </button>
-                    
-                    <button 
-                        onClick={onSignIn}
-                        className="text-slate-400 hover:text-white transition-colors text-sm font-semibold flex items-center gap-2 hover:underline underline-offset-4"
-                    >
-                        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-4 h-4 grayscale opacity-70 group-hover:grayscale-0 group-hover:opacity-100" />
-                        Already have an account? Sign in
                     </button>
                 </div>
 
@@ -1297,48 +1194,6 @@ export default function App() {
         return saved ? JSON.parse(saved) : true;
     });
 
-    // --- Authentication State ---
-    const [user, setUser] = useState<User | null>(null);
-
-    // Monitor Auth State
-    useEffect(() => {
-        if (!auth) return; // Skip if not configured
-        
-        const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-            setUser(currentUser);
-            if (currentUser) {
-                console.log("User Logged In:", currentUser.uid);
-                // Here is where you would trigger a fetch from Firestore using currentUser.uid
-            } else {
-                console.log("User Logged Out");
-            }
-        });
-        return () => unsubscribe();
-    }, []);
-
-    // Handle Google Sign In
-    const handleGoogleSignIn = async () => {
-        if (!auth || !googleProvider) {
-            alert("Firebase is not configured with valid keys. Please update App.tsx.");
-            return;
-        }
-        
-        try {
-            const result = await signInWithPopup(auth, googleProvider);
-            // The user is automatically set by the onAuthStateChanged observer
-            // You can access additional info here if needed:
-            // const credential = GoogleAuthProvider.credentialFromResult(result);
-            // const token = credential?.accessToken;
-            // const user = result.user;
-            
-            // Navigate to tracker if successful
-            setCurrentView('tracker');
-        } catch (error) {
-            console.error("Google Sign In Error:", error);
-            alert("Failed to sign in. Please check your configuration.");
-        }
-    };
-
     // Persistence
     useEffect(() => {
         localStorage.setItem('pokewalker-caught', JSON.stringify(caughtData));
@@ -1427,7 +1282,7 @@ export default function App() {
     };
 
     if (currentView === 'home') {
-        return <LandingPage onStart={handleStart} onSignIn={handleGoogleSignIn} />;
+        return <LandingPage onStart={handleStart} />;
     }
 
     if (currentView === 'guide') {
@@ -1460,7 +1315,6 @@ export default function App() {
             onOpenHistory={handleOpenHistory}
             onViewMilestones={handleViewMilestones}
             currentPoints={currentPoints}
-            user={user}
         />
     );
 }
