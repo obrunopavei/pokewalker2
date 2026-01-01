@@ -1,0 +1,5 @@
+{
+  "name": "Pokéwalker Challenge Tracker",
+  "description": "A progress tracker for the Pokéwalker Challenge, featuring route-based checklists, point milestones, and persistent storage.",
+  "requestFramePermissions": []
+}
