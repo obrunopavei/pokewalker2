@@ -2,6 +2,10 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Search, Filter, Check, Trophy, MapPin, Footprints, Zap, Package, Settings, X, Trash2, AlertTriangle, ArrowRight, Star, Construction, LayoutGrid, ArrowLeft, BookOpen, Globe, Gift, Flag, ChevronDown, ArrowUpDown, Calendar, History } from 'lucide-react';
 import { POKEMON_DB, MILESTONES, ROUTE_ORDER, SPECIAL_ROUTES, POST_NATIONAL_ROUTES } from './constants';
 import { PokemonEntry, Rarity } from './types';
+import { useAuth } from './lib/auth-context';
+import { useFirestoreSync } from './lib/firestore-sync';
+import { GoogleSignIn } from './components/GoogleSignIn';
+import { UserProfile } from './components/UserProfile';
 
 // --- Utility Functions ---
 
@@ -757,6 +761,7 @@ const Tracker: React.FC<TrackerProps> = ({
     onViewMilestones,
     currentPoints,
 }) => {
+  const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [filterState, setFilterState] = useState<'all' | 'caught' | 'uncaught'>('all');
   const [sortState, setSortState] = useState<'default' | 'name' | 'completion' | 'points'>('default');
@@ -861,6 +866,12 @@ const Tracker: React.FC<TrackerProps> = ({
                 <p className="mt-2 text-gray-500">Track your progress to Mt. Silver.</p>
             </div>
             <div className="flex items-center gap-3">
+                {/* Show user profile if signed in, otherwise show sign-in button */}
+                {user ? (
+                    <UserProfile />
+                ) : (
+                    <GoogleSignIn variant="minimal" />
+                )}
                 <button 
                     onClick={() => setIsSettingsOpen(true)}
                     className="p-2 hover:bg-gray-100 rounded-lg text-gray-500 transition-colors"
@@ -1004,6 +1015,8 @@ const Tracker: React.FC<TrackerProps> = ({
 // --- View: Landing Page ---
 
 const LandingPage: React.FC<{ onStart: () => void }> = ({ onStart }) => {
+    const { user } = useAuth();
+
     return (
         <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-center relative overflow-hidden">
             {/* Background Effects */}
@@ -1035,6 +1048,16 @@ const LandingPage: React.FC<{ onStart: () => void }> = ({ onStart }) => {
                         Begin Your Adventure
                         <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                     </button>
+
+                    {/* Add Google Sign-In option */}
+                    {!user && (
+                        <div className="mt-6 pt-6 border-t border-slate-700 w-full max-w-md">
+                            <p className="text-sm text-slate-400 mb-4">
+                                Sign in to sync your progress across devices
+                            </p>
+                            <GoogleSignIn variant="large" onSuccess={onStart} />
+                        </div>
+                    )}
                 </div>
 
                 <div className="mt-12 flex justify-center gap-8 text-slate-500 text-sm font-medium">
@@ -1150,6 +1173,9 @@ const ModeSelection: React.FC<{ onSelectMode: (isCompletionist: boolean) => void
 // --- App Orchestrator ---
 
 export default function App() {
+    // Firebase Authentication
+    const { user, userProfile, loading: authLoading } = useAuth();
+
     const [currentView, setCurrentView] = useState<'home' | 'modes' | 'tracker' | 'guide' | 'milestones' | 'history'>(() => {
         if (typeof window !== 'undefined') {
             const hasStarted = localStorage.getItem('pokewalker-has-started') === 'true';
@@ -1160,8 +1186,7 @@ export default function App() {
     const [previousView, setPreviousView] = useState<'modes' | 'tracker'>('modes');
 
     // --- Global State ---
-    
-    // Migration logic from Set<string> to Record<string, number>
+    // Initialize from localStorage first (will be overridden by Firestore if user is signed in)
     const [caughtData, setCaughtData] = useState<Record<string, number>>(() => {
         const saved = localStorage.getItem('pokewalker-caught');
         if (!saved) return {};
@@ -1194,18 +1219,49 @@ export default function App() {
         return saved ? JSON.parse(saved) : true;
     });
 
-    // Persistence
+    // Load data from Firestore when user profile becomes available
     useEffect(() => {
-        localStorage.setItem('pokewalker-caught', JSON.stringify(caughtData));
-    }, [caughtData]);
+        if (userProfile && user) {
+            // Load caughtData from Firestore if available
+            if (userProfile.caughtData !== undefined) {
+                setCaughtData(userProfile.caughtData);
+            }
+            // Load isCompletionist from Firestore if available
+            if (userProfile.isCompletionist !== undefined) {
+                setIsCompletionist(userProfile.isCompletionist);
+            }
+            // Load autoCollapsePostNational from Firestore if available
+            if (userProfile.autoCollapsePostNational !== undefined) {
+                setAutoCollapsePostNational(userProfile.autoCollapsePostNational);
+            }
+        }
+    }, [userProfile, user]);
+
+    // Sync to Firestore when user is signed in (automatic, debounced)
+    const { isSyncing } = useFirestoreSync(
+        caughtData,
+        isCompletionist,
+        autoCollapsePostNational
+    );
+
+    // Persist to localStorage only when user is NOT signed in
+    useEffect(() => {
+        if (!user) {
+            localStorage.setItem('pokewalker-caught', JSON.stringify(caughtData));
+        }
+    }, [caughtData, user]);
 
     useEffect(() => {
-        localStorage.setItem('pokewalker-mode', JSON.stringify(isCompletionist));
-    }, [isCompletionist]);
+        if (!user) {
+            localStorage.setItem('pokewalker-mode', JSON.stringify(isCompletionist));
+        }
+    }, [isCompletionist, user]);
 
     useEffect(() => {
-        localStorage.setItem('pokewalker-auto-collapse', JSON.stringify(autoCollapsePostNational));
-    }, [autoCollapsePostNational]);
+        if (!user) {
+            localStorage.setItem('pokewalker-auto-collapse', JSON.stringify(autoCollapsePostNational));
+        }
+    }, [autoCollapsePostNational, user]);
 
     // Global Actions
     const togglePokemon = (id: string) => {
@@ -1281,6 +1337,18 @@ export default function App() {
         setCurrentView(previousView);
     };
 
+    // Show loading state while auth is initializing
+    if (authLoading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-gray-50">
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-rose-600 mx-auto mb-4"></div>
+                    <p className="text-gray-500">Loading...</p>
+                </div>
+            </div>
+        );
+    }
+
     if (currentView === 'home') {
         return <LandingPage onStart={handleStart} />;
     }
@@ -1302,19 +1370,28 @@ export default function App() {
     }
 
     return (
-        <Tracker 
-            caughtData={caughtData}
-            isCompletionist={isCompletionist}
-            onTogglePokemon={togglePokemon}
-            onResetProgress={resetProgress}
-            onToggleCompletionist={toggleCompletionist}
-            autoCollapsePostNational={autoCollapsePostNational}
-            onToggleAutoCollapse={toggleAutoCollapse}
-            onGoHome={handleGoHome} 
-            onOpenGuide={handleOpenGuide}
-            onOpenHistory={handleOpenHistory}
-            onViewMilestones={handleViewMilestones}
-            currentPoints={currentPoints}
-        />
+        <>
+            {/* Show sync indicator when syncing to Firestore */}
+            {isSyncing && user && (
+                <div className="fixed top-4 right-4 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg z-50 flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    <span className="text-sm font-medium">Syncing...</span>
+                </div>
+            )}
+            <Tracker 
+                caughtData={caughtData}
+                isCompletionist={isCompletionist}
+                onTogglePokemon={togglePokemon}
+                onResetProgress={resetProgress}
+                onToggleCompletionist={toggleCompletionist}
+                autoCollapsePostNational={autoCollapsePostNational}
+                onToggleAutoCollapse={toggleAutoCollapse}
+                onGoHome={handleGoHome} 
+                onOpenGuide={handleOpenGuide}
+                onOpenHistory={handleOpenHistory}
+                onViewMilestones={handleViewMilestones}
+                currentPoints={currentPoints}
+            />
+        </>
     );
 }
