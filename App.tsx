@@ -1,14 +1,46 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Filter, Check, Trophy, MapPin, Footprints, Zap, Package, Settings, X, Trash2, AlertTriangle, ArrowRight, Star, Construction, LayoutGrid, ArrowLeft, BookOpen, Globe, Gift, Flag, ChevronDown, ArrowUpDown } from 'lucide-react';
+import { Search, Filter, Check, Trophy, MapPin, Footprints, Zap, Package, Settings, X, Trash2, AlertTriangle, ArrowRight, Star, Construction, LayoutGrid, ArrowLeft, BookOpen, Globe, Gift, Flag, ChevronDown, ArrowUpDown, Calendar, History, LogIn, LogOut, User as UserIcon } from 'lucide-react';
 import { POKEMON_DB, MILESTONES, ROUTE_ORDER, SPECIAL_ROUTES, POST_NATIONAL_ROUTES } from './constants';
 import { PokemonEntry, Rarity } from './types';
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
+
+// --- Firebase Configuration ---
+// TODO: Replace with your actual Firebase project configuration
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
+
+// Initialize Firebase
+// Check if apps already exist to avoid re-initialization errors in development
+// AND check if the API key is actually configured (not the placeholder)
+const isFirebaseConfigured = firebaseConfig.apiKey && firebaseConfig.apiKey !== "YOUR_API_KEY";
+
+let app;
+let auth: any = null;
+let googleProvider: any = null;
+
+if (isFirebaseConfigured) {
+    try {
+        app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+        auth = getAuth(app);
+        googleProvider = new GoogleAuthProvider();
+    } catch (error) {
+        console.error("Firebase Initialization Error:", error);
+    }
+} else {
+    console.warn("Firebase is not configured with valid keys. Running in offline mode.");
+}
 
 // --- Utility Functions ---
 
 /**
  * Performs a fuzzy match between a query and a target string.
- * Returns true if the query characters appear in the target string in order,
- * or if the target contains the query as a direct substring.
  */
 const fuzzyMatch = (query: string, target: string): boolean => {
   const q = query.toLowerCase().trim();
@@ -17,7 +49,6 @@ const fuzzyMatch = (query: string, target: string): boolean => {
   if (q === '') return true;
   if (t.includes(q)) return true;
 
-  // Character sequence matching (e.g., "pkchu" matches "Pikachu")
   let queryIdx = 0;
   let targetIdx = 0;
   while (queryIdx < q.length && targetIdx < t.length) {
@@ -27,6 +58,14 @@ const fuzzyMatch = (query: string, target: string): boolean => {
     targetIdx++;
   }
   return queryIdx === q.length;
+};
+
+const formatDate = (timestamp: number) => {
+    return new Date(timestamp).toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+    });
 };
 
 // --- Helper Components ---
@@ -125,9 +164,11 @@ const ProgressBar: React.FC<{ currentPoints: number, isCompletionist: boolean, o
 
 const PokemonCard: React.FC<{ 
     pokemon: PokemonEntry; 
-    isChecked: boolean; 
+    caughtTimestamp?: number; 
     onToggle: (id: string) => void; 
-}> = React.memo(({ pokemon, isChecked, onToggle }) => {
+}> = React.memo(({ pokemon, caughtTimestamp, onToggle }) => {
+  const isChecked = !!caughtTimestamp;
+
   return (
     <div 
         onClick={() => onToggle(pokemon.id)}
@@ -182,10 +223,9 @@ const PokemonCard: React.FC<{
                         </span>
                     )}
                 </div>
-                {pokemon.item && (
-                    <div className="flex items-center gap-1 text-amber-600 font-medium">
-                        <Package className="w-3 h-3" />
-                        <span>Holds: {pokemon.item}</span>
+                {isChecked && (
+                    <div className="text-[10px] text-rose-600 font-medium">
+                        Caught: {formatDate(caughtTimestamp)}
                     </div>
                 )}
             </div>
@@ -211,6 +251,10 @@ const SettingsModal: React.FC<{
     onResetProgress: () => void;
     onGoHome: () => void;
     onOpenGuide: () => void;
+    onOpenHistory: () => void;
+    user: User | null;
+    onSignIn: () => void;
+    onSignOut: () => void;
 }> = ({ 
     isOpen, 
     onClose, 
@@ -220,7 +264,11 @@ const SettingsModal: React.FC<{
     onToggleAutoCollapse,
     onResetProgress, 
     onGoHome, 
-    onOpenGuide 
+    onOpenGuide,
+    onOpenHistory,
+    user,
+    onSignIn,
+    onSignOut
 }) => {
     const [confirmReset, setConfirmReset] = useState(false);
 
@@ -244,6 +292,48 @@ const SettingsModal: React.FC<{
                 </div>
                 
                 <div className="p-6 max-h-[80vh] overflow-y-auto">
+                    
+                    {/* User Profile / Auth */}
+                    <div className="mb-6 p-4 bg-gray-50 rounded-xl border border-gray-100">
+                        {user ? (
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    {user.photoURL ? (
+                                        <img src={user.photoURL} alt={user.displayName || "User"} className="w-10 h-10 rounded-full border border-gray-200" />
+                                    ) : (
+                                        <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center text-rose-500">
+                                            <UserIcon className="w-5 h-5" />
+                                        </div>
+                                    )}
+                                    <div className="overflow-hidden">
+                                        <p className="text-sm font-bold text-gray-900 truncate">{user.displayName || "Trainer"}</p>
+                                        <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                                    </div>
+                                </div>
+                                <button 
+                                    onClick={onSignOut}
+                                    className="p-2 hover:bg-gray-200 rounded-full text-gray-500 transition-colors"
+                                    title="Sign Out"
+                                >
+                                    <LogOut className="w-4 h-4" />
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="text-center">
+                                <p className="text-sm text-gray-500 mb-3">
+                                    Sign in to save your progress to the cloud.
+                                </p>
+                                <button 
+                                    onClick={onSignIn}
+                                    className="w-full flex items-center justify-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-semibold py-2 px-4 rounded-lg transition-colors text-sm shadow-sm"
+                                >
+                                    <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-4 h-4" />
+                                    Sign in with Google
+                                </button>
+                            </div>
+                        )}
+                    </div>
+
                     {/* Game Mode Settings */}
                     <div className="space-y-6">
                         <div className="flex items-start justify-between gap-4">
@@ -289,7 +379,18 @@ const SettingsModal: React.FC<{
                         </div>
                     </div>
 
-                    <div className="mt-6 pt-6 border-t border-gray-100">
+                    <div className="mt-6 pt-6 border-t border-gray-100 space-y-3">
+                         <button 
+                            onClick={() => { onClose(); onOpenHistory(); }}
+                            className="flex items-center justify-between w-full p-3 bg-amber-50 hover:bg-amber-100 text-amber-900 rounded-lg transition-colors group"
+                        >
+                            <span className="flex items-center gap-2 font-medium text-sm">
+                                <History className="w-4 h-4" />
+                                View Catch History
+                            </span>
+                            <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                        </button>
+
                         <button 
                             onClick={() => { onClose(); onOpenGuide(); }}
                             className="flex items-center justify-between w-full p-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors group"
@@ -361,6 +462,143 @@ const SettingsModal: React.FC<{
         </div>
     );
 };
+
+// --- View: History/Calendar Page ---
+
+const HistoryPage: React.FC<{
+    caughtData: Record<string, number>;
+    onBack: () => void;
+}> = ({ caughtData, onBack }) => {
+    
+    // 1. Transform Data for Heatmap
+    const { activityMap, days } = useMemo(() => {
+        const map: Record<string, { count: number, ids: string[] }> = {};
+        
+        // Populate map from caughtData
+        Object.entries(caughtData).forEach(([id, timestamp]) => {
+            const dateKey = new Date(timestamp as number).toDateString(); // "Mon Jan 01 2024"
+            if (!map[dateKey]) {
+                map[dateKey] = { count: 0, ids: [] };
+            }
+            map[dateKey].count += 1;
+            map[dateKey].ids.push(id);
+        });
+
+        // Generate grid days (e.g., last 3 months or based on range)
+        // For simplicity, let's just do a list of dates that have activity, sorted descending
+        const sortedDates = Object.keys(map).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+        
+        return { activityMap: map, days: sortedDates };
+    }, [caughtData]);
+
+    const [selectedDate, setSelectedDate] = useState<string | null>(days.length > 0 ? days[0] : null);
+
+    const getIntensityClass = (count: number) => {
+        if (count === 0) return "bg-gray-100 text-gray-400";
+        if (count <= 2) return "bg-green-200 text-green-800 border-green-300";
+        if (count <= 5) return "bg-green-400 text-green-900 border-green-500";
+        return "bg-green-600 text-white border-green-700";
+    };
+
+    const selectedPokemons = useMemo(() => {
+        if (!selectedDate || !activityMap[selectedDate]) return [];
+        const ids = activityMap[selectedDate].ids;
+        return POKEMON_DB.filter(p => ids.includes(p.id));
+    }, [selectedDate, activityMap]);
+
+    return (
+        <div className="min-h-screen bg-gray-50 pb-20">
+             <header className="bg-white border-b border-gray-200 sticky top-0 z-30 shadow-sm">
+                <div className="max-w-3xl mx-auto px-4 py-4 flex items-center gap-4">
+                    <button 
+                        onClick={onBack}
+                        className="p-2 -ml-2 hover:bg-gray-100 rounded-full text-gray-500 transition-colors"
+                    >
+                        <ArrowLeft className="w-6 h-6" />
+                    </button>
+                    <div>
+                        <h1 className="text-xl font-bold text-gray-900">Catch History</h1>
+                        <p className="text-xs text-gray-500">
+                           Total Caught: {Object.keys(caughtData).length.toLocaleString()}
+                        </p>
+                    </div>
+                </div>
+            </header>
+
+            <div className="max-w-3xl mx-auto px-4 py-8">
+                {/* Heatmap / Calendar View */}
+                <div className="bg-white rounded-xl border border-gray-200 p-6 mb-8 shadow-sm">
+                    <h2 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4 flex items-center gap-2">
+                        <Calendar className="w-4 h-4" /> Activity Log
+                    </h2>
+                    
+                    {days.length === 0 ? (
+                        <div className="text-center py-8 text-gray-500 text-sm">
+                            No Pokémon caught yet. Start your journey!
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                             {days.map(dateStr => {
+                                 const data = activityMap[dateStr];
+                                 const isSelected = selectedDate === dateStr;
+                                 const dateObj = new Date(dateStr);
+                                 
+                                 return (
+                                     <button
+                                        key={dateStr}
+                                        onClick={() => setSelectedDate(dateStr)}
+                                        className={`
+                                            flex flex-col items-center justify-center p-3 rounded-lg border transition-all
+                                            ${isSelected ? 'ring-2 ring-rose-500 ring-offset-2' : 'hover:scale-105'}
+                                            ${getIntensityClass(data.count)}
+                                        `}
+                                     >
+                                         <span className="text-xs font-bold uppercase opacity-80">
+                                             {dateObj.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                         </span>
+                                         <span className="text-lg font-black">
+                                             {data.count}
+                                         </span>
+                                     </button>
+                                 )
+                             })}
+                        </div>
+                    )}
+                </div>
+
+                {/* Details View */}
+                {selectedDate && selectedPokemons.length > 0 && (
+                    <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
+                        <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                             Activity for {new Date(selectedDate as string).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                        </h3>
+                        <div className="space-y-3">
+                            {selectedPokemons.map(pokemon => (
+                                <div key={pokemon.id} className="flex items-center bg-white p-3 rounded-xl border border-gray-200 shadow-sm">
+                                    <div className="w-10 h-10 bg-gray-50 rounded-lg flex items-center justify-center mr-4">
+                                        <img 
+                                            src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${pokemon.dexId}.png`}
+                                            alt={pokemon.name}
+                                            className="w-8 h-8 object-contain"
+                                        />
+                                    </div>
+                                    <div>
+                                        <div className="font-bold text-gray-900">{pokemon.name}</div>
+                                        <div className="text-xs text-gray-500 flex items-center gap-2">
+                                            <span>{pokemon.route}</span>
+                                            <span className="text-gray-300">•</span>
+                                            <span className="text-rose-600 font-medium">+{pokemon.points} pts</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
 
 // --- View: Special Routes Guide ---
 
@@ -572,7 +810,7 @@ const MilestonesPage: React.FC<{
 // --- View: Tracker (Main Application Logic) ---
 
 interface TrackerProps {
-    caughtIds: Set<string>;
+    caughtData: Record<string, number>;
     isCompletionist: boolean;
     onTogglePokemon: (id: string) => void;
     onResetProgress: () => void;
@@ -581,12 +819,14 @@ interface TrackerProps {
     onToggleAutoCollapse: () => void;
     onGoHome: () => void;
     onOpenGuide: () => void;
+    onOpenHistory: () => void;
     onViewMilestones: () => void;
     currentPoints: number;
+    user: User | null;
 }
 
 const Tracker: React.FC<TrackerProps> = ({ 
-    caughtIds, 
+    caughtData, 
     isCompletionist, 
     onTogglePokemon, 
     onResetProgress, 
@@ -595,8 +835,10 @@ const Tracker: React.FC<TrackerProps> = ({
     onToggleAutoCollapse,
     onGoHome, 
     onOpenGuide,
+    onOpenHistory,
     onViewMilestones,
-    currentPoints
+    currentPoints,
+    user
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterState, setFilterState] = useState<'all' | 'caught' | 'uncaught'>('all');
@@ -625,8 +867,9 @@ const Tracker: React.FC<TrackerProps> = ({
         const matchesSearch = fuzzyMatch(searchQuery, p.name) || fuzzyMatch(searchQuery, p.route);
         if (!matchesSearch) return false;
 
-        if (filterState === 'caught') return caughtIds.has(p.id);
-        if (filterState === 'uncaught') return !caughtIds.has(p.id);
+        const isCaught = !!caughtData[p.id];
+        if (filterState === 'caught') return isCaught;
+        if (filterState === 'uncaught') return !isCaught;
         return true;
     });
 
@@ -654,7 +897,7 @@ const Tracker: React.FC<TrackerProps> = ({
         if (sortState === 'completion') {
             const getRatio = (list: PokemonEntry[]) => {
                 if (list.length === 0) return 0;
-                return list.filter(p => caughtIds.has(p.id)).length / list.length;
+                return list.filter(p => !!caughtData[p.id]).length / list.length;
             }
             const ratioA = getRatio(a[1]);
             const ratioB = getRatio(b[1]);
@@ -671,7 +914,7 @@ const Tracker: React.FC<TrackerProps> = ({
         if (indexB !== -1) return 1;
         return routeA.localeCompare(routeB);
     });
-  }, [searchQuery, filterState, caughtIds, isCompletionist, sortState]);
+  }, [searchQuery, filterState, caughtData, isCompletionist, sortState]);
 
   return (
     <div className="min-h-screen pb-20 bg-gray-50">
@@ -685,6 +928,13 @@ const Tracker: React.FC<TrackerProps> = ({
         onResetProgress={() => { onResetProgress(); setIsSettingsOpen(false); }}
         onGoHome={onGoHome}
         onOpenGuide={() => { setIsSettingsOpen(false); onOpenGuide(); }}
+        onOpenHistory={() => { setIsSettingsOpen(false); onOpenHistory(); }}
+        user={user}
+        onSignIn={() => { 
+            const provider = new GoogleAuthProvider();
+            signInWithPopup(auth, provider); 
+        }}
+        onSignOut={() => auth && signOut(auth)}
       />
 
       {/* Header */}
@@ -699,13 +949,21 @@ const Tracker: React.FC<TrackerProps> = ({
                 </h1>
                 <p className="mt-2 text-gray-500">Track your progress to Mt. Silver.</p>
             </div>
-            <button 
-                onClick={() => setIsSettingsOpen(true)}
-                className="p-2 hover:bg-gray-100 rounded-lg text-gray-500 transition-colors"
-                aria-label="Settings"
-            >
-                <Settings className="w-6 h-6" />
-            </button>
+            <div className="flex items-center gap-3">
+                {user && (
+                    <div className="hidden sm:flex items-center gap-2 bg-rose-50 px-3 py-1.5 rounded-full border border-rose-100">
+                        {user.photoURL && <img src={user.photoURL} alt="Profile" className="w-6 h-6 rounded-full" />}
+                        <span className="text-xs font-bold text-rose-700 max-w-[100px] truncate">{user.displayName?.split(' ')[0]}</span>
+                    </div>
+                )}
+                <button 
+                    onClick={() => setIsSettingsOpen(true)}
+                    className="p-2 hover:bg-gray-100 rounded-lg text-gray-500 transition-colors"
+                    aria-label="Settings"
+                >
+                    <Settings className="w-6 h-6" />
+                </button>
+            </div>
         </div>
       </header>
 
@@ -713,7 +971,8 @@ const Tracker: React.FC<TrackerProps> = ({
       <ProgressBar currentPoints={currentPoints} isCompletionist={isCompletionist} onClick={onViewMilestones} />
 
       {/* Controls */}
-      <div className="max-w-5xl mx-auto px-4 py-6">
+      <div className="max-w-5xl mx-auto px-4 py-6 space-y-4">
+        {/* Main Controls Row */}
         <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
             <div className="relative w-full md:w-72">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
@@ -785,7 +1044,7 @@ const Tracker: React.FC<TrackerProps> = ({
         ) : (
             groupedPokemon.map(([route, pokemons]) => {
                 const isCollapsed = collapsedRoutes.has(route);
-                const caughtCount = pokemons.filter(p => caughtIds.has(p.id)).length;
+                const caughtCount = pokemons.filter(p => !!caughtData[p.id]).length;
                 const total = pokemons.length;
                 
                 return (
@@ -821,7 +1080,7 @@ const Tracker: React.FC<TrackerProps> = ({
                                         <PokemonCard 
                                             key={pokemon.id} 
                                             pokemon={pokemon} 
-                                            isChecked={caughtIds.has(pokemon.id)} 
+                                            caughtTimestamp={caughtData[pokemon.id]} 
                                             onToggle={onTogglePokemon} 
                                         />
                                     ))}
@@ -839,7 +1098,7 @@ const Tracker: React.FC<TrackerProps> = ({
 
 // --- View: Landing Page ---
 
-const LandingPage: React.FC<{ onStart: () => void }> = ({ onStart }) => {
+const LandingPage: React.FC<{ onStart: () => void; onSignIn: () => void }> = ({ onStart, onSignIn }) => {
     return (
         <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-center relative overflow-hidden">
             {/* Background Effects */}
@@ -863,13 +1122,23 @@ const LandingPage: React.FC<{ onStart: () => void }> = ({ onStart }) => {
                     on your way to Mt. Silver.
                 </p>
 
-                <button 
-                    onClick={onStart}
-                    className="group relative inline-flex items-center gap-3 px-8 py-4 bg-rose-600 hover:bg-rose-500 text-white font-bold text-lg rounded-full transition-all hover:scale-105 shadow-[0_0_40px_-10px_rgba(225,29,72,0.5)]"
-                >
-                    Begin Your Adventure
-                    <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                </button>
+                <div className="flex flex-col gap-4 items-center">
+                    <button 
+                        onClick={onStart}
+                        className="group relative inline-flex items-center gap-3 px-8 py-4 bg-rose-600 hover:bg-rose-500 text-white font-bold text-lg rounded-full transition-all hover:scale-105 shadow-[0_0_40px_-10px_rgba(225,29,72,0.5)]"
+                    >
+                        Begin Your Adventure
+                        <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                    </button>
+                    
+                    <button 
+                        onClick={onSignIn}
+                        className="text-slate-400 hover:text-white transition-colors text-sm font-semibold flex items-center gap-2 hover:underline underline-offset-4"
+                    >
+                        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-4 h-4 grayscale opacity-70 group-hover:grayscale-0 group-hover:opacity-100" />
+                        Already have an account? Sign in
+                    </button>
+                </div>
 
                 <div className="mt-12 flex justify-center gap-8 text-slate-500 text-sm font-medium">
                     <span className="flex items-center gap-2">
@@ -984,7 +1253,7 @@ const ModeSelection: React.FC<{ onSelectMode: (isCompletionist: boolean) => void
 // --- App Orchestrator ---
 
 export default function App() {
-    const [currentView, setCurrentView] = useState<'home' | 'modes' | 'tracker' | 'guide' | 'milestones'>(() => {
+    const [currentView, setCurrentView] = useState<'home' | 'modes' | 'tracker' | 'guide' | 'milestones' | 'history'>(() => {
         if (typeof window !== 'undefined') {
             const hasStarted = localStorage.getItem('pokewalker-has-started') === 'true';
             return hasStarted ? 'tracker' : 'home';
@@ -994,9 +1263,27 @@ export default function App() {
     const [previousView, setPreviousView] = useState<'modes' | 'tracker'>('modes');
 
     // --- Global State ---
-    const [caughtIds, setCaughtIds] = useState<Set<string>>(() => {
+    
+    // Migration logic from Set<string> to Record<string, number>
+    const [caughtData, setCaughtData] = useState<Record<string, number>>(() => {
         const saved = localStorage.getItem('pokewalker-caught');
-        return saved ? new Set(JSON.parse(saved)) : new Set();
+        if (!saved) return {};
+        
+        try {
+            const parsed = JSON.parse(saved);
+            // Check if old format (Array/Set)
+            if (Array.isArray(parsed)) {
+                const migratedData: Record<string, number> = {};
+                parsed.forEach(id => {
+                    migratedData[id] = Date.now(); // Default to now for migration
+                });
+                return migratedData;
+            }
+            return parsed;
+        } catch (e) {
+            console.error("Failed to parse caught data", e);
+            return {};
+        }
     });
 
     const [isCompletionist, setIsCompletionist] = useState<boolean>(() => {
@@ -1010,10 +1297,52 @@ export default function App() {
         return saved ? JSON.parse(saved) : true;
     });
 
+    // --- Authentication State ---
+    const [user, setUser] = useState<User | null>(null);
+
+    // Monitor Auth State
+    useEffect(() => {
+        if (!auth) return; // Skip if not configured
+        
+        const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+            setUser(currentUser);
+            if (currentUser) {
+                console.log("User Logged In:", currentUser.uid);
+                // Here is where you would trigger a fetch from Firestore using currentUser.uid
+            } else {
+                console.log("User Logged Out");
+            }
+        });
+        return () => unsubscribe();
+    }, []);
+
+    // Handle Google Sign In
+    const handleGoogleSignIn = async () => {
+        if (!auth || !googleProvider) {
+            alert("Firebase is not configured with valid keys. Please update App.tsx.");
+            return;
+        }
+        
+        try {
+            const result = await signInWithPopup(auth, googleProvider);
+            // The user is automatically set by the onAuthStateChanged observer
+            // You can access additional info here if needed:
+            // const credential = GoogleAuthProvider.credentialFromResult(result);
+            // const token = credential?.accessToken;
+            // const user = result.user;
+            
+            // Navigate to tracker if successful
+            setCurrentView('tracker');
+        } catch (error) {
+            console.error("Google Sign In Error:", error);
+            alert("Failed to sign in. Please check your configuration.");
+        }
+    };
+
     // Persistence
     useEffect(() => {
-        localStorage.setItem('pokewalker-caught', JSON.stringify(Array.from(caughtIds)));
-    }, [caughtIds]);
+        localStorage.setItem('pokewalker-caught', JSON.stringify(caughtData));
+    }, [caughtData]);
 
     useEffect(() => {
         localStorage.setItem('pokewalker-mode', JSON.stringify(isCompletionist));
@@ -1025,16 +1354,19 @@ export default function App() {
 
     // Global Actions
     const togglePokemon = (id: string) => {
-        setCaughtIds(prev => {
-          const next = new Set(prev);
-          if (next.has(id)) next.delete(id);
-          else next.add(id);
-          return next;
+        setCaughtData(prev => {
+            const next = { ...prev };
+            if (next[id]) {
+                delete next[id];
+            } else {
+                next[id] = Date.now();
+            }
+            return next;
         });
     };
 
     const resetProgress = () => {
-        setCaughtIds(new Set());
+        setCaughtData({});
     };
 
     const toggleCompletionist = () => {
@@ -1049,9 +1381,9 @@ export default function App() {
     const currentPoints = useMemo(() => {
         return POKEMON_DB.reduce((acc, curr) => {
             if (!isCompletionist && SPECIAL_ROUTES.includes(curr.route)) return acc;
-            return caughtIds.has(curr.id) ? acc + curr.points : acc;
+            return caughtData[curr.id] ? acc + curr.points : acc;
         }, 0);
-    }, [caughtIds, isCompletionist]);
+    }, [caughtData, isCompletionist]);
 
     // Navigation Handlers
     const handleStart = () => {
@@ -1070,10 +1402,17 @@ export default function App() {
 
     const handleOpenGuide = () => {
         if (currentView !== 'guide') {
-            setPreviousView(currentView === 'milestones' ? 'tracker' : currentView as 'modes' | 'tracker');
+            setPreviousView(currentView === 'milestones' || currentView === 'history' ? 'tracker' : currentView as 'modes' | 'tracker');
         }
         setCurrentView('guide');
     };
+    
+    const handleOpenHistory = () => {
+        if (currentView !== 'history') {
+             setPreviousView(currentView === 'milestones' || currentView === 'guide' ? 'tracker' : currentView as 'modes' | 'tracker');
+        }
+        setCurrentView('history');
+    }
 
     const handleViewMilestones = () => {
         setCurrentView('milestones');
@@ -1088,11 +1427,15 @@ export default function App() {
     };
 
     if (currentView === 'home') {
-        return <LandingPage onStart={handleStart} />;
+        return <LandingPage onStart={handleStart} onSignIn={handleGoogleSignIn} />;
     }
 
     if (currentView === 'guide') {
         return <SpecialRoutesGuide onBack={handleBackFromGuide} />;
+    }
+    
+    if (currentView === 'history') {
+        return <HistoryPage caughtData={caughtData} onBack={handleBackToTracker} />;
     }
 
     if (currentView === 'modes') {
@@ -1105,7 +1448,7 @@ export default function App() {
 
     return (
         <Tracker 
-            caughtIds={caughtIds}
+            caughtData={caughtData}
             isCompletionist={isCompletionist}
             onTogglePokemon={togglePokemon}
             onResetProgress={resetProgress}
@@ -1114,8 +1457,10 @@ export default function App() {
             onToggleAutoCollapse={toggleAutoCollapse}
             onGoHome={handleGoHome} 
             onOpenGuide={handleOpenGuide}
+            onOpenHistory={handleOpenHistory}
             onViewMilestones={handleViewMilestones}
             currentPoints={currentPoints}
+            user={user}
         />
     );
 }
