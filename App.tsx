@@ -1219,23 +1219,24 @@ export default function App() {
         return saved ? JSON.parse(saved) : true;
     });
 
-    // Load data from Firestore when user profile becomes available
+    // Load data from Firestore when user profile becomes available (only if data actually changed)
     useEffect(() => {
         if (userProfile && user) {
-            // Load caughtData from Firestore if available
-            if (userProfile.caughtData !== undefined) {
+            // Only update if data is actually different to avoid sync loops
+            if (userProfile.caughtData !== undefined && 
+                JSON.stringify(userProfile.caughtData) !== JSON.stringify(caughtData)) {
                 setCaughtData(userProfile.caughtData);
             }
-            // Load isCompletionist from Firestore if available
-            if (userProfile.isCompletionist !== undefined) {
+            if (userProfile.isCompletionist !== undefined && 
+                userProfile.isCompletionist !== isCompletionist) {
                 setIsCompletionist(userProfile.isCompletionist);
             }
-            // Load autoCollapsePostNational from Firestore if available
-            if (userProfile.autoCollapsePostNational !== undefined) {
+            if (userProfile.autoCollapsePostNational !== undefined && 
+                userProfile.autoCollapsePostNational !== autoCollapsePostNational) {
                 setAutoCollapsePostNational(userProfile.autoCollapsePostNational);
             }
         }
-    }, [userProfile, user]);
+    }, [userProfile?.caughtData, userProfile?.isCompletionist, userProfile?.autoCollapsePostNational, user]);
 
     // Sync to Firestore when user is signed in (automatic, debounced)
     const { isSyncing } = useFirestoreSync(
